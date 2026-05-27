@@ -147,7 +147,9 @@ def lambda_handler(event, context):
 
 # Team Members
 
-* Add team member names here
+Sumukh
+Gospelhope
+Darkhan
 
 ---
 
