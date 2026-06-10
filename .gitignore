@@ -1,0 +1,41 @@
+cd C:\Serverless-Image-Recognition-application
+
+@'
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# AWS creds
+.aws/
+aws_creds.sh
+
+# Python / Lambda
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+lambda/build/
+lambda/*.zip
+lambda/package/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+'@ | Out-File -Encoding utf8 .gitignore

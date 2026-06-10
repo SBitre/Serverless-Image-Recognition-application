@@ -1,0 +1,21 @@
+# Copy this to terraform.tfvars before running plan/apply.
+# terraform.tfvars is gitignored — do NOT commit it.
+
+qc_notification_emails = [
+  "you@example.com",
+  "teammate@example.com"
+]
+
+manual_review_emails = [
+  "you@example.com"
+]
+
+ops_alert_emails = [
+  "you@example.com"
+]
+
+# Optional overrides — uncomment to change defaults:
+# expected_labels             = ["Screw", "Wheel", "Circuit Board"]
+# pass_confidence_threshold   = 80
+# review_confidence_threshold = 70
+# lambda_memory_mb            = 512
