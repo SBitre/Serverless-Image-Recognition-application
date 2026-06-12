@@ -1,5 +1,2 @@
-# Runtime dependencies for widget-inspector Lambda.
-# Empty for stub — boto3 is provided by Lambda runtime.
-# Real implementation will add:
-#   aws-lambda-powertools[tracer]==2.x
-#   pydantic==2.x
+aws-lambda-powertools
+aws-xray-sdk
