@@ -189,8 +189,9 @@ def test_lambda_handler_integration(mock_aws_resources):
     }
 
     with patch("handler.inspect_image", return_value=dummy_inspection), \
-         patch("handler.publish_notification"), \
-         patch("handler.send_manual_review_message"):
+         patch("handler.publish_qc_notification"), \
+         patch("handler.publish_manual_review_alert"), \
+         patch("handler.enqueue_manual_review"):
 
         response = lambda_handler(sqs_event, mock_context)
 

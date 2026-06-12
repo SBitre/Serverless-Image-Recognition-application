@@ -11,12 +11,10 @@ import boto3
 from config import get_config
 from inspector import inspect_image
 from storage import DecimalEncoder, InspectionResult, write_inspection_record, write_result_json
+from notifications import publish_qc_notification, publish_manual_review_alert, enqueue_manual_review
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
-
-sns = boto3.client("sns")
-sqs = boto3.client("sqs")
 
 
 def utc_now() -> str:
@@ -96,60 +94,7 @@ def build_result_payload(
 
 
 
-def build_sns_message(payload: dict, source_bucket: str, result_bucket: str, result_key: str) -> dict:
-    status = payload["status"]
-    expected_count = len(payload["expected_labels"])
-    missing_count = len(payload["missing_labels"])
-    low_conf_count = len(payload["low_confidence_labels"])
 
-    if status == "PASS":
-        summary = f"Widget PASSED. All {expected_count} expected components detected with high confidence."
-        event_type = "inspection_complete"
-    elif status == "FAIL":
-        summary = f"Widget FAILED. {missing_count} expected component(s) were not detected."
-        event_type = "inspection_complete"
-    else:
-        summary = f"Manual review required: {low_conf_count} expected label(s) detected with low confidence."
-        event_type = "manual_review_required"
-
-    return {
-        "event_type": event_type,
-        "status": status,
-        "image_id": payload["image_id"],
-        "image_s3_url": f"s3://{source_bucket}/{payload['image_s3_key']}",
-        "result_s3_url": f"s3://{result_bucket}/{result_key}",
-        "missing_labels": payload["missing_labels"],
-        "low_confidence_labels": payload["low_confidence_labels"],
-        "summary": summary,
-    }
-
-
-def publish_notification(topic_arn: str, payload: dict, source_bucket: str, result_bucket: str, result_key: str) -> None:
-    message = build_sns_message(payload, source_bucket, result_bucket, result_key)
-    subject = f"[Widget Inspection] {payload['status']}: {payload['image_id'][:8]}"
-
-    sns.publish(
-        TopicArn=topic_arn,
-        Subject=subject,
-        Message=json.dumps(message, indent=2, cls=DecimalEncoder),
-    )
-
-
-def send_manual_review_message(queue_url: str, payload: dict, result_key: str) -> None:
-    message = {
-        "event_type": "manual_review_required",
-        "image_id": payload["image_id"],
-        "status": payload["status"],
-        "image_s3_key": payload["image_s3_key"],
-        "result_s3_key": result_key,
-        "low_confidence_labels": payload["low_confidence_labels"],
-        "inspection_timestamp": payload["inspection_timestamp"],
-    }
-
-    sqs.send_message(
-        QueueUrl=queue_url,
-        MessageBody=json.dumps(message, cls=DecimalEncoder),
-    )
 
 
 def lambda_handler(event, context):
@@ -209,27 +154,14 @@ def lambda_handler(event, context):
         result_key = write_result_json(result_obj, request_id)
         write_inspection_record(result_obj, request_id)
 
+        image_s3_url = f"s3://{source_bucket}/{source_key}"
+        result_s3_url = f"s3://{config['inspected_bucket']}/{result_key}"
+
         if result_payload["status"] == "NEEDS_REVIEW":
-            publish_notification(
-                topic_arn=config["manual_review_topic_arn"],
-                payload=result_payload,
-                source_bucket=source_bucket,
-                result_bucket=config["inspected_bucket"],
-                result_key=result_key,
-            )
-            send_manual_review_message(
-                queue_url=config["manual_review_queue_url"],
-                payload=result_payload,
-                result_key=result_key,
-            )
+            publish_manual_review_alert(result_obj, image_s3_url)
+            enqueue_manual_review(result_obj, image_s3_url)
         else:
-            publish_notification(
-                topic_arn=config["qc_topic_arn"],
-                payload=result_payload,
-                source_bucket=source_bucket,
-                result_bucket=config["inspected_bucket"],
-                result_key=result_key,
-            )
+            publish_qc_notification(result_obj, image_s3_url, result_s3_url)
 
         logger.info("Inspection complete image_id=%s status=%s result_key=%s", image_id, result_payload["status"], result_key)
 
