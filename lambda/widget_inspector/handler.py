@@ -10,21 +10,13 @@ import boto3
 
 from config import get_config
 from inspector import inspect_image
+from storage import DecimalEncoder, InspectionResult, write_inspection_record, write_result_json
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-s3 = boto3.client("s3")
-dynamodb = boto3.resource("dynamodb")
 sns = boto3.client("sns")
 sqs = boto3.client("sqs")
-
-
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return float(obj)
-        return super().default(obj)
 
 
 def utc_now() -> str:
@@ -68,19 +60,6 @@ def get_image_id(key: str) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
 
 
-def result_status_prefix(status: str) -> str:
-    if status == "PASS":
-        return "passed"
-    if status == "FAIL":
-        return "failed"
-    return "needs-review"
-
-
-def build_result_key(status: str, inspection_timestamp: str, image_id: str) -> str:
-    date_part = inspection_timestamp[:10]
-    year, month, day = date_part.split("-")
-    return f"inspected/{result_status_prefix(status)}/{year}/{month}/{day}/{image_id}.json"
-
 
 def build_result_payload(
     image_id: str,
@@ -114,49 +93,7 @@ def build_result_payload(
     }
 
 
-def to_dynamodb_item(payload: dict, result_key: str) -> dict:
-    return {
-        "image_id": payload["image_id"],
-        "image_s3_key": payload["image_s3_key"],
-        "image_size_bytes": Decimal(str(payload["image_size_bytes"])),
-        "upload_timestamp": payload["upload_timestamp"],
-        "inspection_timestamp": payload["inspection_timestamp"],
-        "status": payload["status"],
-        "expected_labels": payload["expected_labels"],
-        "detected_labels": [
-            {
-                "name": item["name"],
-                "confidence": Decimal(str(item["confidence"])),
-            }
-            for item in payload["detected_labels"]
-        ],
-        "confirmed_labels": payload["confirmed_labels"],
-        "missing_labels": payload["missing_labels"],
-        "low_confidence_labels": [
-            {
-                "label": item["label"],
-                "confidence": Decimal(str(item["confidence"])),
-            }
-            for item in payload["low_confidence_labels"]
-        ],
-        "result_s3_key": result_key,
-        "lambda_request_id": payload["lambda_request_id"],
-        "rekognition_request_id": payload.get("rekognition_request_id") or "",
-    }
 
-
-def write_result_to_s3(bucket: str, key: str, payload: dict) -> None:
-    s3.put_object(
-        Bucket=bucket,
-        Key=key,
-        Body=json.dumps(payload, indent=2, cls=DecimalEncoder),
-        ContentType="application/json",
-    )
-
-
-def write_result_to_dynamodb(table_name: str, item: dict) -> None:
-    table = dynamodb.Table(table_name)
-    table.put_item(Item=item)
 
 
 def build_sns_message(payload: dict, source_bucket: str, result_bucket: str, result_key: str) -> dict:
@@ -252,20 +189,25 @@ def lambda_handler(event, context):
             lambda_request_id=request_id,
         )
 
-        result_key = build_result_key(
-            status=result_payload["status"],
-            inspection_timestamp=inspection_timestamp,
+        result_obj = InspectionResult(
             image_id=image_id,
+            image_s3_key=source_key,
+            image_size_bytes=parsed["size"],
+            upload_timestamp=parsed["upload_timestamp"],
+            inspection_timestamp=inspection_timestamp,
+            status=inspection["status"],
+            expected_labels=config["expected_labels"],
+            detected_labels=inspection["detected_labels"],
+            confirmed_labels=inspection["confirmed_labels"],
+            missing_labels=inspection["missing_labels"],
+            low_confidence_labels=inspection["low_confidence_labels"],
+            pass_threshold=config["pass_threshold"],
+            review_threshold=config["review_threshold"],
+            rekognition_request_id=inspection.get("rekognition_request_id") or "",
         )
 
-        write_result_to_s3(
-            bucket=config["inspected_bucket"],
-            key=result_key,
-            payload=result_payload,
-        )
-
-        dynamodb_item = to_dynamodb_item(result_payload, result_key)
-        write_result_to_dynamodb(config["dynamodb_table"], dynamodb_item)
+        result_key = write_result_json(result_obj, request_id)
+        write_inspection_record(result_obj, request_id)
 
         if result_payload["status"] == "NEEDS_REVIEW":
             publish_notification(
