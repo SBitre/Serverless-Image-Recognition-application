@@ -52,3 +52,15 @@ module "processing" {
   lambda_timeout_seconds          = var.lambda_timeout_seconds
   lambda_reserved_concurrency     = var.lambda_reserved_concurrency
 }
+
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  resource_prefix          = var.resource_prefix
+  aws_region               = var.aws_region
+  lambda_function_name     = module.processing.lambda_function_name
+  main_queue_name          = "wi-inspection-queue"
+  dlq_name                 = "wi-inspection-dlq"
+  manual_review_queue_name = "wi-manual-review-queue"
+  ops_alerts_topic_arn     = module.notifications.ops_alerts_topic_arn
+}

@@ -57,3 +57,8 @@ output "lambda_log_group_name" {
   description = "CloudWatch log group for Lambda"
   value       = module.processing.lambda_log_group_name
 }
+
+output "dashboard_url" {
+  description = "Link to the CloudWatch dashboard"
+  value       = module.monitoring.dashboard_url
+}
